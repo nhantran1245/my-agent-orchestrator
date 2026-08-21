@@ -195,7 +195,7 @@ async function createPR(
     const { stdout, stderr } = await execFileAsync(
       'gh',
       ['pr', 'create', '--title', title, '--body', body, '--base', job.baseBranch, '--head', branchName],
-      { cwd },
+      { cwd, env: { ...process.env, GH_TOKEN: process.env.GH_TOKEN } },
     );
     if (stderr) logger.warn(`gh pr create stderr: ${stderr}`);
     logger.log(`PR created: ${stdout.trim()}`);

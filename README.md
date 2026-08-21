@@ -332,4 +332,7 @@ curl "https://your-project.vercel.app/api/jobs?status=FAILED" | jq .
 | Cron jobs | 2 | 1 used (daily cleanup) |
 | Postgres (Neon) | 256MB | Cleaned weekly (7-day retention) |
 
-See [docs/architecture.md](docs/architecture.md) and [docs/setup.md](docs/setup.md) for detailed documentation.
+See detailed docs:
+- [Architecture](docs/architecture.md) — system design, data flow, multi-user model
+- [Admin Setup](docs/admin-setup.md) — deploy Vercel, configure DB, register users
+- [Worker Setup](docs/worker-setup.md) — local worker setup for each user

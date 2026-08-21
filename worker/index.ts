@@ -10,6 +10,7 @@ import { execute } from '../lib/claude-code.worker';
 import { addJiraComment } from '../lib/jira-api.client';
 import { resolveRepository } from '../lib/repository-resolver';
 import { logger } from '../lib/logger';
+import { startDashboard } from './dashboard';
 
 const POLL_INTERVAL = 5000;
 let processing = false;
@@ -106,6 +107,10 @@ process.on('SIGTERM', () => {
   logger.log('Shutting down worker...');
   process.exit(0);
 });
+
+// Start dashboard
+const DASHBOARD_PORT = parseInt(process.env.DASHBOARD_PORT || '3099', 10);
+startDashboard(DASHBOARD_PORT, WORKER_USER_ID);
 
 // Start polling
 logger.log(`Worker started for user ${WORKER_USER_ID}, polling every 5s...`);
