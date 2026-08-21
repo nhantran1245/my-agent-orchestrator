@@ -9,7 +9,7 @@ export async function handleCallback(payload: GitHubCallbackPayload): Promise<Ag
   const logCtx = {
     jobId: job.id,
     jiraIssueKey: job.jiraIssueKey,
-    repository: job.repoPath,
+    repository: job.repoPath || undefined,
   };
 
   if (payload.status === CallbackStatus.COMPLETED) {

@@ -1,8 +1,6 @@
 import { JiraWebhookEvent } from './types';
-import { AppError, ErrorCode } from './errors';
 import { logger } from './logger';
 import { createJob } from './jobs.service';
-import { resolveRepository } from './repository-resolver';
 
 export async function handleWebhookEvent(
   event: JiraWebhookEvent,
@@ -25,28 +23,13 @@ export async function handleWebhookEvent(
 
   const projectKey = event.issue.fields.project.key;
   const issueKey = event.issue.key;
-
-  const mapping = resolveRepository(projectKey);
-  if (!mapping) {
-    throw new AppError(
-      ErrorCode.UNKNOWN_JIRA_PROJECT,
-      `No repository mapping found for Jira project: ${projectKey}`,
-      { projectKey },
-    );
-  }
-
   const idempotencyKey = generateIdempotencyKey(event);
 
-  logger.log('Processing AI assignment', {
-    jiraIssueKey: issueKey,
-    repository: mapping.repoPath,
-  });
+  logger.log('Processing AI assignment', { jiraIssueKey: issueKey });
 
   const job = await createJob({
     jiraIssueKey: issueKey,
     jiraProjectKey: projectKey,
-    repoPath: mapping.repoPath,
-    baseBranch: mapping.baseBranch,
     idempotencyKey,
     metadata: {
       summary: event.issue.fields.summary,

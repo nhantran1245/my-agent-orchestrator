@@ -8,6 +8,7 @@ import {
 } from '../lib/jobs.service';
 import { execute } from '../lib/claude-code.worker';
 import { addJiraComment } from '../lib/jira-api.client';
+import { resolveRepository } from '../lib/repository-resolver';
 import { logger } from '../lib/logger';
 
 const POLL_INTERVAL = 5000;
@@ -22,10 +23,29 @@ async function poll(): Promise<void> {
     if (pendingJobs.length === 0) return;
 
     const job = pendingJobs[0];
+
+    // Resolve repo mapping locally
+    const mapping = resolveRepository(job.jiraProjectKey);
+    if (!mapping) {
+      logger.error(
+        `No repository mapping for project: ${job.jiraProjectKey}`,
+        undefined,
+        { jobId: job.id, jiraIssueKey: job.jiraIssueKey },
+      );
+      await transitionToFailed(
+        job.id,
+        `No repository mapping found for project: ${job.jiraProjectKey}. Check repos.json or REPO_MAPPINGS env var.`,
+      );
+      return;
+    }
+
+    // Enrich job with repo info for the worker
+    const enrichedJob = { ...job, repoPath: mapping.repoPath, baseBranch: mapping.baseBranch };
+
     const logCtx = {
       jobId: job.id,
       jiraIssueKey: job.jiraIssueKey,
-      repository: job.repoPath,
+      repository: mapping.repoPath,
     };
 
     logger.log('Processing job', { ...logCtx, status: 'QUEUED' });
@@ -35,11 +55,13 @@ async function poll(): Promise<void> {
     await transitionToRunning(job.id);
 
     try {
-      const result = await execute(job);
+      const result = await execute(enrichedJob);
 
       if (result.success) {
         logger.log('Agent execution completed', { ...logCtx, status: 'COMPLETED' });
         await transitionToCompleted(job.id, {
+          repoPath: mapping.repoPath,
+          baseBranch: mapping.baseBranch,
           branchName: result.branchName,
           pullRequestUrl: result.pullRequestUrl,
           claudeOutput: result.claudeOutput,

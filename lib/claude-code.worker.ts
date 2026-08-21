@@ -7,7 +7,9 @@ import { logger } from './logger';
 
 const execFileAsync = promisify(execFile);
 
-export async function execute(job: AgentJob): Promise<AgentResult> {
+type JobWithRepo = AgentJob & { repoPath: string; baseBranch: string };
+
+export async function execute(job: JobWithRepo): Promise<AgentResult> {
   const logCtx = {
     jobId: job.id,
     jiraIssueKey: job.jiraIssueKey,
@@ -155,7 +157,7 @@ async function runClaude(cwd: string, prompt: string): Promise<string> {
 
 async function createPR(
   cwd: string,
-  job: AgentJob,
+  job: JobWithRepo,
   metadata: Record<string, string>,
   branchName: string,
   claudeOutput: string,

@@ -85,7 +85,7 @@ Plain TypeScript modules shared by both API routes and the worker. Zero framewor
 | `jira.service.ts` | Webhook event processing: filter assignment events, resolve repo, create job |
 | `jira-api.client.ts` | Post comments on Jira tickets (PR links) |
 | `callbacks.service.ts` | Handle GitHub callback: update job status |
-| `repository-resolver.ts` | Map Jira project key → repo path + base branch (from env var `REPO_MAPPINGS`) |
+| `repository-resolver.ts` | Map Jira project key → repo path + base branch (from `repos.json` or `REPO_MAPPINGS` env var, worker-only) |
 | `claude-code.worker.ts` | Execute Claude Code CLI, git operations, PR creation (worker-only) |
 
 ### Local Worker (`worker/`)
@@ -118,8 +118,8 @@ agent_jobs
 ├── id              UUID (PK)
 ├── jiraIssueKey    String       "IVY-42"
 ├── jiraProjectKey  String       "IVY"
-├── repoPath        String       "/path/to/repo"
-├── baseBranch      String       "dev"
+├── repoPath        String?      filled by worker after repo resolution
+├── baseBranch      String?      filled by worker after repo resolution
 ├── agentType       String       "claude-code"
 ├── status          Enum         PENDING | QUEUED | RUNNING | COMPLETED | FAILED
 ├── idempotencyKey  String       "jira:IVY-42:assign:12345" (unique)
@@ -145,12 +145,11 @@ POST /api/webhooks/jira
   │
   ├── Is it an assignee change event? No → 202 { status: "ignored" }
   ├── Is assignee the AI user?        No → 202 { status: "ignored" }
-  ├── Resolve project key → repo mapping
   ├── Generate idempotency key: jira:{issueKey}:assign:{changelogId}
   ├── Check if job already exists     Yes → 202 { status: "ignored" }
   │
   ▼
-INSERT agent_jobs (status=PENDING)
+INSERT agent_jobs (status=PENDING, raw Jira data only)
   │
   ▼
 202 { status: "accepted", jobId: "..." }
@@ -166,6 +165,7 @@ Worker polls DB every 5s
   ▼
 Pick oldest PENDING job
   │
+  ├── Resolve project key → repo path (from local repos.json)
   ├── PENDING → QUEUED → RUNNING
   │
   ▼

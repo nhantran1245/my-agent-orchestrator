@@ -52,7 +52,7 @@ PENDING → QUEUED → RUNNING → COMPLETED
 |------|---------|---------|
 | Node.js 18+ | `brew install node` | Runtime |
 | pnpm | `npm install -g pnpm` | Package manager |
-| Vercel CLI | `npm install -g vercel` | Deploy & dev |
+| Vercel CLI | `npm install -g vercel` | Pull env vars & local dev |
 | Claude Code CLI | `npm install -g @anthropic-ai/claude-code` | AI coding agent |
 | GitHub CLI | `brew install gh` | Create PRs |
 
@@ -61,7 +61,7 @@ Authenticate:
 ```bash
 claude                # follow login prompt
 gh auth login         # GitHub CLI
-vercel login          # Vercel CLI
+vercel login          # Vercel CLI (needed for `vercel env pull`)
 ```
 
 ---
@@ -76,51 +76,62 @@ cd my-agent-orchestrator
 pnpm install
 ```
 
-### 2. Set Up Vercel + Database
+### 2. Deploy to Vercel
+
+1. Push repo to GitHub
+2. Go to [vercel.com/new](https://vercel.com/new)
+3. **Import** your GitHub repository
+4. Vercel auto-detects the project — click **Deploy**
+5. Wait for the first deploy to complete
+
+Your project URL: `https://your-project.vercel.app`
+
+### 3. Create Database (Neon Postgres)
+
+1. Go to your Vercel project → **Storage** tab
+2. Click **Create Database** → choose **Neon Serverless Postgres**
+3. Select a region close to you (e.g. Singapore)
+4. Click **Create**
+
+Vercel auto-creates `DATABASE_URL`, `DIRECT_URL`, etc. as environment variables.
+
+Now run migrations:
 
 ```bash
-# Link to Vercel project
-vercel link
-
-# Create Neon Postgres via Vercel Dashboard:
-# Project → Storage → Create Database → Neon Serverless Postgres
-```
-
-Vercel auto-creates `DATABASE_URL` and `DIRECT_URL` env vars.
-
-```bash
-# Run migrations
+# Pull the DB env vars to local
 vercel env pull .env.local
+
+# Run Prisma migrations against Neon
 dotenv -e .env.local -- npx prisma migrate deploy
 ```
 
-### 3. Configure Vercel Environment Variables
+### 4. Set Environment Variables
+
+1. Go to your Vercel project → **Settings** → **Environment Variables**
+2. Add each variable:
+
+| Name | Value | Notes |
+|------|-------|-------|
+| `JIRA_WEBHOOK_SECRET` | `openssl rand -hex 32` | Generate a random string |
+| `JIRA_AI_USERNAME` | `712020:xxxx-xxxx-...` | Your Jira account ID ([how to find](#how-to-get-jira_ai_username)) |
+| `JIRA_BASE_URL` | `https://your-org.atlassian.net` | |
+| `JIRA_API_TOKEN` | *(from id.atlassian.com)* | [Create API token](https://id.atlassian.com/manage-profile/security/api-tokens) |
+| `JIRA_USER_EMAIL` | `your-email@company.com` | Email for Jira API basic auth |
+| `CALLBACK_SECRET` | `openssl rand -hex 32` | For GitHub callback auth |
+
+3. Click **Save** for each variable
+4. Go to **Deployments** → click **Redeploy** on the latest deploy (so new env vars take effect)
+
+> **Note:** `REPO_MAPPINGS` is **not** needed on Vercel. The API only saves raw Jira data (project key, issue key, metadata). Repository mapping is resolved by the local worker.
+
+### 5. Verify Deploy
 
 ```bash
-vercel env add JIRA_WEBHOOK_SECRET      # random string: openssl rand -hex 32
-vercel env add JIRA_AI_USERNAME         # your Jira account ID (see below)
-vercel env add JIRA_BASE_URL            # https://your-org.atlassian.net
-vercel env add JIRA_API_TOKEN           # from id.atlassian.com
-vercel env add JIRA_USER_EMAIL          # email for Jira API auth
-vercel env add CALLBACK_SECRET          # random string for GitHub callback
-vercel env add REPO_MAPPINGS            # JSON (see below)
+curl https://your-project.vercel.app/api/health
+# → {"status":"ok"}
 ```
 
-**REPO_MAPPINGS** format:
-
-```json
-{"IVY":{"repoPath":"/Users/you/projects/ivy-2","baseBranch":"dev"}}
-```
-
-### 4. Deploy
-
-```bash
-vercel --prod
-```
-
-Your webhook URL: `https://your-project.vercel.app/api/webhooks/jira`
-
-### 5. Configure Jira Webhook
+### 6. Configure Jira Webhook
 
 1. Go to **Jira → Settings → System → WebHooks**
 2. Create webhook:
@@ -129,7 +140,7 @@ Your webhook URL: `https://your-project.vercel.app/api/webhooks/jira`
    - **Events**: Issue → updated
    - **JQL filter** (optional): `project in (IVY, MIABOS)`
 
-### 6. Set Up Local Worker
+### 7. Set Up Local Worker
 
 Create `.env` in project root:
 
@@ -142,6 +153,19 @@ GH_TOKEN=ghp_xxxxxxxxxxxx
 ```
 
 Use the **direct** (non-pooled) Neon connection URL for the worker.
+
+Configure repository mappings in `repos.json`:
+
+```json
+{
+  "IVY": {
+    "repoPath": "/Users/you/projects/ivy-2",
+    "baseBranch": "dev"
+  }
+}
+```
+
+This maps Jira project keys to local repo paths. When the worker picks up a job for project `IVY`, it looks up the repo path here.
 
 Ensure repos are cloned locally:
 
@@ -216,7 +240,7 @@ pnpm typecheck             # TypeScript check
 pnpm prisma:migrate        # Run migrations (dev)
 pnpm prisma:migrate:deploy # Run migrations (prod)
 pnpm prisma:studio         # Open Prisma Studio
-pnpm deploy                # Deploy to Vercel
+pnpm deploy                # Deploy to Vercel (or push to GitHub for auto-deploy)
 ```
 
 ---

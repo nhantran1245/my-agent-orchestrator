@@ -8,8 +8,6 @@ export { AgentJob, JobStatus } from '@prisma/client';
 export interface CreateJobInput {
   jiraIssueKey: string;
   jiraProjectKey: string;
-  repoPath: string;
-  baseBranch: string;
   idempotencyKey: string;
   metadata?: Record<string, unknown>;
 }

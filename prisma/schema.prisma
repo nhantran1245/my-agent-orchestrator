@@ -20,8 +20,8 @@ model AgentJob {
   id              String    @id @default(uuid()) @db.Uuid
   jiraIssueKey    String
   jiraProjectKey  String
-  repoPath        String
-  baseBranch      String
+  repoPath        String?
+  baseBranch      String?
   agentType       String    @default("claude-code")
   status          JobStatus @default(PENDING)
   idempotencyKey  String    @unique

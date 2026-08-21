@@ -22,8 +22,6 @@ export async function createJob(input: CreateJobInput): Promise<AgentJob | null>
     data: {
       jiraIssueKey: input.jiraIssueKey,
       jiraProjectKey: input.jiraProjectKey,
-      repoPath: input.repoPath,
-      baseBranch: input.baseBranch,
       idempotencyKey: input.idempotencyKey,
       status: JobStatus.PENDING,
       metadata: input.metadata ? JSON.parse(JSON.stringify(input.metadata)) : undefined,
@@ -33,7 +31,6 @@ export async function createJob(input: CreateJobInput): Promise<AgentJob | null>
   logger.log('Agent job created', {
     jobId: job.id,
     jiraIssueKey: job.jiraIssueKey,
-    repository: job.repoPath,
     status: job.status,
   });
 
