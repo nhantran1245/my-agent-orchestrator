@@ -1,0 +1,10 @@
+{
+  "IVY": {
+    "repoPath": "/Users/nhantran/Documents/dev/mia-projects/ivy-2",
+    "baseBranch": "dev"
+  },
+  "MIABOS": {
+    "repoPath": "/Users/nhantran/Documents/dev/mia-projects/mia-chatbot",
+    "baseBranch": "develop"
+  }
+}

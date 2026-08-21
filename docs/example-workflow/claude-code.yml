@@ -1,0 +1,127 @@
+# Place this file at .github/workflows/claude-code.yml in your target repository.
+# It receives workflow_dispatch events from the Agent Orchestrator
+# and runs Claude Code to implement the Jira task.
+
+name: Claude Code Agent
+
+on:
+  workflow_dispatch:
+    inputs:
+      jira_issue_key:
+        description: 'Jira issue key (e.g. ABC-123)'
+        required: true
+      jira_issue_summary:
+        description: 'Jira issue summary'
+        required: true
+      jira_issue_description:
+        description: 'Jira issue description'
+        required: false
+        default: ''
+      base_branch:
+        description: 'Base branch to create the feature branch from'
+        required: true
+      job_id:
+        description: 'Orchestrator job ID for callback'
+        required: true
+
+jobs:
+  implement:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.base_branch }}
+          fetch-depth: 0
+
+      - name: Create feature branch
+        run: |
+          BRANCH_NAME="agent/${{ inputs.jira_issue_key }}"
+          BRANCH_NAME=$(echo "$BRANCH_NAME" | tr '[:upper:]' '[:lower:]')
+          git checkout -b "$BRANCH_NAME"
+          echo "BRANCH_NAME=$BRANCH_NAME" >> "$GITHUB_ENV"
+
+      - name: Run Claude Code
+        uses: anthropics/claude-code-action@v1
+        with:
+          prompt: |
+            Implement the following Jira task:
+
+            **Issue**: ${{ inputs.jira_issue_key }}
+            **Summary**: ${{ inputs.jira_issue_summary }}
+            **Description**: ${{ inputs.jira_issue_description }}
+
+            Instructions:
+            1. Read the CLAUDE.md file for project conventions.
+            2. Implement the task described above.
+            3. Write tests for your changes.
+            4. Make sure all existing tests still pass.
+            5. Commit your changes with a clear commit message referencing ${{ inputs.jira_issue_key }}.
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          allowed_tools: |
+            Bash
+            Read
+            Write
+            Edit
+            Glob
+            Grep
+
+      - name: Push branch
+        run: |
+          git push origin "$BRANCH_NAME"
+
+      - name: Create Pull Request
+        id: create_pr
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data: pr } = await github.rest.pulls.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `[${{ inputs.jira_issue_key }}] ${{ inputs.jira_issue_summary }}`,
+              body: [
+                `## Jira Issue`,
+                `**${{ inputs.jira_issue_key }}**: ${{ inputs.jira_issue_summary }}`,
+                ``,
+                `## Description`,
+                `${{ inputs.jira_issue_description }}`,
+                ``,
+                `---`,
+                `*Automated by Agent Orchestrator (Job: \`${{ inputs.job_id }}\`)*`
+              ].join('\n'),
+              head: process.env.BRANCH_NAME,
+              base: '${{ inputs.base_branch }}',
+            });
+            core.setOutput('pr_url', pr.html_url);
+            core.setOutput('pr_number', pr.number);
+
+      - name: Callback to orchestrator (success)
+        if: success()
+        run: |
+          curl -X POST "${{ secrets.ORCHESTRATOR_URL }}/webhooks/github/callback" \
+            -H "Content-Type: application/json" \
+            -H "x-callback-secret: ${{ secrets.ORCHESTRATOR_CALLBACK_SECRET }}" \
+            -d '{
+              "jobId": "${{ inputs.job_id }}",
+              "status": "completed",
+              "branchName": "'"$BRANCH_NAME"'",
+              "pullRequestUrl": "${{ steps.create_pr.outputs.pr_url }}"
+            }'
+
+      - name: Callback to orchestrator (failure)
+        if: failure()
+        run: |
+          curl -X POST "${{ secrets.ORCHESTRATOR_URL }}/webhooks/github/callback" \
+            -H "Content-Type: application/json" \
+            -H "x-callback-secret: ${{ secrets.ORCHESTRATOR_CALLBACK_SECRET }}" \
+            -d '{
+              "jobId": "${{ inputs.job_id }}",
+              "status": "failed",
+              "error": "GitHub Actions workflow failed. Check run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            }'

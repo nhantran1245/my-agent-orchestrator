@@ -1,0 +1,30 @@
+{
+  "name": "my-agent-orchestrator",
+  "version": "0.1.0",
+  "description": "Agent Orchestrator — Vercel webhook server + local worker",
+  "private": true,
+  "license": "MIT",
+  "scripts": {
+    "build": "prisma generate && tsc",
+    "dev": "vercel dev",
+    "worker": "ts-node worker/index.ts",
+    "worker:dev": "dotenv -e .env -- ts-node worker/index.ts",
+    "typecheck": "tsc --noEmit",
+    "prisma:generate": "prisma generate",
+    "prisma:migrate": "prisma migrate dev",
+    "prisma:migrate:deploy": "prisma migrate deploy",
+    "prisma:studio": "prisma studio",
+    "deploy": "vercel --prod"
+  },
+  "dependencies": {
+    "@prisma/client": "^6.5.0",
+    "dotenv": "^16.4.7"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.10",
+    "@vercel/node": "^5.1.5",
+    "prisma": "^6.5.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.8.2"
+  }
+}
