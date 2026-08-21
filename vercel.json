@@ -1,4 +1,7 @@
 {
+  "buildCommand": "prisma generate",
+  "outputDirectory": ".",
+  "framework": null,
   "crons": [
     {
       "path": "/api/cron/cleanup",
