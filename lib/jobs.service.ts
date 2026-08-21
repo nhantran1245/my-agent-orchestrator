@@ -22,6 +22,7 @@ export async function createJob(input: CreateJobInput): Promise<AgentJob | null>
     data: {
       jiraIssueKey: input.jiraIssueKey,
       jiraProjectKey: input.jiraProjectKey,
+      assigneeAccountId: input.assigneeAccountId,
       idempotencyKey: input.idempotencyKey,
       status: JobStatus.PENDING,
       metadata: input.metadata ? JSON.parse(JSON.stringify(input.metadata)) : undefined,
@@ -45,9 +46,15 @@ export async function getJob(id: string): Promise<AgentJob> {
   return job;
 }
 
-export async function findPendingJobs(limit = 10): Promise<AgentJob[]> {
+export async function findPendingJobs(
+  limit = 10,
+  assigneeAccountId?: string,
+): Promise<AgentJob[]> {
   return prisma.agentJob.findMany({
-    where: { status: JobStatus.PENDING },
+    where: {
+      status: JobStatus.PENDING,
+      ...(assigneeAccountId ? { assigneeAccountId } : {}),
+    },
     orderBy: { createdAt: 'asc' },
     take: limit,
   });
@@ -112,10 +119,13 @@ export async function transitionToFailed(
 
 export async function listJobs(options?: {
   status?: JobStatus;
+  assigneeAccountId?: string;
   limit?: number;
   offset?: number;
 }): Promise<{ jobs: AgentJob[]; total: number }> {
-  const where = options?.status ? { status: options.status } : {};
+  const where: Record<string, unknown> = {};
+  if (options?.status) where.status = options.status;
+  if (options?.assigneeAccountId) where.assigneeAccountId = options.assigneeAccountId;
   const [jobs, total] = await Promise.all([
     prisma.agentJob.findMany({
       where,
@@ -128,7 +138,7 @@ export async function listJobs(options?: {
   return { jobs, total };
 }
 
-export async function deleteOldJobs(olderThanDays = 30): Promise<number> {
+export async function deleteOldJobs(olderThanDays = 7): Promise<number> {
   const cutoff = new Date();
   cutoff.setDate(cutoff.getDate() - olderThanDays);
 

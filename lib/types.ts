@@ -8,6 +8,7 @@ export { AgentJob, JobStatus } from '@prisma/client';
 export interface CreateJobInput {
   jiraIssueKey: string;
   jiraProjectKey: string;
+  assigneeAccountId: string;
   idempotencyKey: string;
   metadata?: Record<string, unknown>;
 }

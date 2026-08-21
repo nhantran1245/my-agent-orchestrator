@@ -14,12 +14,18 @@ import { logger } from '../lib/logger';
 const POLL_INTERVAL = 5000;
 let processing = false;
 
+const WORKER_USER_ID = process.env.WORKER_USER_ID;
+if (!WORKER_USER_ID) {
+  logger.error('WORKER_USER_ID is required. Set it in .env to your Jira account ID.');
+  process.exit(1);
+}
+
 async function poll(): Promise<void> {
   if (processing) return;
 
   processing = true;
   try {
-    const pendingJobs = await findPendingJobs(1);
+    const pendingJobs = await findPendingJobs(1, WORKER_USER_ID);
     if (pendingJobs.length === 0) return;
 
     const job = pendingJobs[0];
@@ -102,5 +108,5 @@ process.on('SIGTERM', () => {
 });
 
 // Start polling
-logger.log('Worker started, polling every 5s...');
+logger.log(`Worker started for user ${WORKER_USER_ID}, polling every 5s...`);
 setInterval(poll, POLL_INTERVAL);

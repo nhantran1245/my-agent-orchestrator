@@ -7,19 +7,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  // Validate webhook secret
-  const secret = process.env.JIRA_WEBHOOK_SECRET;
-  if (secret) {
-    const provided =
-      req.headers['x-webhook-secret'] ||
-      (req.headers['authorization']
-        ? (req.headers['authorization'] as string).replace('Bearer ', '')
-        : null);
-
-    if (!provided || provided !== secret) {
-      return res.status(401).json({ error: 'Unauthorized' });
-    }
-  }
+  // TODO: Jira Cloud does not support custom headers on webhooks.
+  // Consider alternative auth (IP allowlist, signed payloads) in production.
 
   const event = req.body;
   logger.log(
@@ -27,12 +16,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   );
 
   try {
-    const aiUsername = process.env.JIRA_AI_USERNAME;
-    if (!aiUsername) {
-      return res.status(500).json({ error: 'JIRA_AI_USERNAME not configured' });
+    const usernamesRaw = process.env.JIRA_AI_USERNAMES;
+    if (!usernamesRaw) {
+      return res.status(500).json({ error: 'JIRA_AI_USERNAMES not configured' });
     }
 
-    const result = await handleWebhookEvent(event, aiUsername);
+    const registeredUserIds = usernamesRaw.split(',').map((s) => s.trim()).filter(Boolean);
+
+    const result = await handleWebhookEvent(event, registeredUserIds);
 
     if (!result) {
       return res.status(202).json({ status: 'ignored' });

@@ -4,7 +4,7 @@ import { createJob } from './jobs.service';
 
 export async function handleWebhookEvent(
   event: JiraWebhookEvent,
-  aiUsername: string,
+  registeredUserIds: string[],
 ): Promise<{ jobId: string } | null> {
   if (!isAssignmentEvent(event)) {
     logger.log('Ignoring non-assignment event', {
@@ -14,8 +14,8 @@ export async function handleWebhookEvent(
   }
 
   const assignee = getAssignee(event);
-  if (!assignee || assignee !== aiUsername) {
-    logger.log('Ignoring assignment to non-AI user', {
+  if (!assignee || !registeredUserIds.includes(assignee)) {
+    logger.log('Ignoring assignment to non-registered user', {
       jiraIssueKey: event.issue?.key,
     });
     return null;
@@ -25,18 +25,18 @@ export async function handleWebhookEvent(
   const issueKey = event.issue.key;
   const idempotencyKey = generateIdempotencyKey(event);
 
-  logger.log('Processing AI assignment', { jiraIssueKey: issueKey });
+  logger.log('Processing assignment', { jiraIssueKey: issueKey });
 
   const job = await createJob({
     jiraIssueKey: issueKey,
     jiraProjectKey: projectKey,
+    assigneeAccountId: assignee,
     idempotencyKey,
     metadata: {
       summary: event.issue.fields.summary,
       description: event.issue.fields.description,
       issueType: event.issue.fields.issuetype.name,
       priority: event.issue.fields.priority?.name,
-      assigneeAccountId: assignee,
     },
   });
 

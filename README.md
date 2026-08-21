@@ -1,30 +1,33 @@
 # Agent Orchestrator
 
-Receive Jira webhooks on Vercel, run Claude Code on local repos, push branches and create PRs automatically.
+Multi-user Jira → Claude Code → GitHub PR automation. Vercel receives webhooks 24/7, each user runs their own local worker.
 
-## Architecture
+## How It Works
 
 ```
 ┌─────────────── Vercel (cloud, 24/7) ───────────────┐
 │                                                      │
 │   Jira ──POST /api/webhooks/jira──▶ Create job (DB) │
-│                                          │           │
-│   Cron (daily) ──▶ Cleanup old jobs      │           │
-│                                          │           │
-│                        Neon PostgreSQL ◀──┘           │
-│                              │                       │
-└──────────────────────────────┼───────────────────────┘
-                               │
-                    ┌──────────▼──────────┐
-                    │  Local Worker        │
-                    │  (polls DB every 5s) │
-                    │                      │
-                    │  1. git checkout      │
-                    │  2. claude --print    │
-                    │  3. git push          │
-                    │  4. gh pr create      │
-                    └──────────────────────┘
+│   (assign ticket to a registered user)               │
+│                                                      │
+│   Cron (daily) ──▶ Cleanup jobs > 7 days             │
+│                                                      │
+│                        Neon PostgreSQL ◀─────────    │
+└────────────────────────────┼─────────────────────────┘
+                             │
+              ┌──────────────┼──────────────┐
+              │              │              │
+     ┌────────▼───────┐  ┌──▼───────┐  ┌──▼───────┐
+     │ Worker (User A) │  │ Worker B │  │ Worker C │
+     │ polls own jobs  │  │          │  │          │
+     │                 │  │          │  │          │
+     │ claude --print  │  │  ...     │  │  ...     │
+     │ git push        │  │          │  │          │
+     │ gh pr create    │  │          │  │          │
+     └─────────────────┘  └──────────┘  └──────────┘
 ```
+
+Each worker only picks up jobs assigned to its `WORKER_USER_ID`.
 
 ### Job Lifecycle
 
@@ -33,40 +36,30 @@ PENDING → QUEUED → RUNNING → COMPLETED
                            → FAILED
 ```
 
-### API Endpoints (Vercel)
+### API Endpoints
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `GET` | `/api/health` | Health check |
 | `POST` | `/api/webhooks/jira` | Jira webhook (returns `202`) |
 | `POST` | `/api/webhooks/github/callback` | GitHub Actions callback |
-| `GET` | `/api/jobs` | List jobs (`?status=RUNNING&limit=10`) |
+| `GET` | `/api/jobs` | List jobs (`?status=RUNNING&assignee=<id>&limit=10`) |
 | `GET` | `/api/jobs/[id]` | Get job by ID |
-| `GET` | `/api/cron/cleanup` | Daily cron: delete old jobs |
+| `GET` | `/api/health` | Health check |
+| `GET` | `/api/cron/cleanup` | Daily cron: delete jobs older than 7 days |
 
 ---
 
-## Prerequisites
+## Admin Setup (one-time)
+
+The admin deploys the Vercel API and manages the list of registered users.
+
+### Prerequisites
 
 | Tool | Install | Purpose |
 |------|---------|---------|
 | Node.js 18+ | `brew install node` | Runtime |
 | pnpm | `npm install -g pnpm` | Package manager |
-| Vercel CLI | `npm install -g vercel` | Pull env vars & local dev |
-| Claude Code CLI | `npm install -g @anthropic-ai/claude-code` | AI coding agent |
-| GitHub CLI | `brew install gh` | Create PRs |
-
-Authenticate:
-
-```bash
-claude                # follow login prompt
-gh auth login         # GitHub CLI
-vercel login          # Vercel CLI (needed for `vercel env pull`)
-```
-
----
-
-## Quick Start
+| Vercel CLI | `npm install -g vercel` | Pull env vars |
 
 ### 1. Clone & Install
 
@@ -79,82 +72,98 @@ pnpm install
 ### 2. Deploy to Vercel
 
 1. Push repo to GitHub
-2. Go to [vercel.com/new](https://vercel.com/new)
-3. **Import** your GitHub repository
-4. Vercel auto-detects the project — click **Deploy**
-5. Wait for the first deploy to complete
+2. Go to [vercel.com/new](https://vercel.com/new) → **Import** your repository → **Deploy**
 
-Your project URL: `https://your-project.vercel.app`
+### 3. Create Database
 
-### 3. Create Database (Neon Postgres)
-
-1. Go to your Vercel project → **Storage** tab
-2. Click **Create Database** → choose **Neon Serverless Postgres**
-3. Select a region close to you (e.g. Singapore)
-4. Click **Create**
-
-Vercel auto-creates `DATABASE_URL`, `DIRECT_URL`, etc. as environment variables.
-
-Now run migrations:
+1. Vercel project → **Storage** tab → **Create Database** → **Neon Serverless Postgres**
+2. Run migrations:
 
 ```bash
-# Pull the DB env vars to local
 vercel env pull .env.local
-
-# Run Prisma migrations against Neon
-dotenv -e .env.local -- npx prisma migrate deploy
+npx prisma migrate deploy
 ```
 
 ### 4. Set Environment Variables
 
-1. Go to your Vercel project → **Settings** → **Environment Variables**
-2. Add each variable:
+Vercel project → **Settings** → **Environment Variables**:
 
 | Name | Value | Notes |
 |------|-------|-------|
-| `JIRA_WEBHOOK_SECRET` | `openssl rand -hex 32` | Generate a random string |
-| `JIRA_AI_USERNAME` | `712020:xxxx-xxxx-...` | Your Jira account ID ([how to find](#how-to-get-jira_ai_username)) |
+| `JIRA_WEBHOOK_SECRET` | `openssl rand -hex 32` | Random string |
+| `JIRA_AI_USERNAMES` | `712020:aaa,712020:bbb` | Comma-separated Jira account IDs of all registered users |
 | `JIRA_BASE_URL` | `https://your-org.atlassian.net` | |
 | `JIRA_API_TOKEN` | *(from id.atlassian.com)* | [Create API token](https://id.atlassian.com/manage-profile/security/api-tokens) |
-| `JIRA_USER_EMAIL` | `your-email@company.com` | Email for Jira API basic auth |
+| `JIRA_USER_EMAIL` | `admin@company.com` | Email for Jira API basic auth |
 | `CALLBACK_SECRET` | `openssl rand -hex 32` | For GitHub callback auth |
 
-3. Click **Save** for each variable
-4. Go to **Deployments** → click **Redeploy** on the latest deploy (so new env vars take effect)
+After saving, **Redeploy** from the Deployments tab.
 
-> **Note:** `REPO_MAPPINGS` is **not** needed on Vercel. The API only saves raw Jira data (project key, issue key, metadata). Repository mapping is resolved by the local worker.
+### 5. Configure Jira Webhook
 
-### 5. Verify Deploy
-
-```bash
-curl https://your-project.vercel.app/api/health
-# → {"status":"ok"}
-```
-
-### 6. Configure Jira Webhook
-
-1. Go to **Jira → Settings → System → WebHooks**
+1. **Jira → Settings → System → WebHooks**
 2. Create webhook:
    - **URL**: `https://your-project.vercel.app/api/webhooks/jira`
    - **Header**: `x-webhook-secret` = your `JIRA_WEBHOOK_SECRET`
    - **Events**: Issue → updated
-   - **JQL filter** (optional): `project in (IVY, MIABOS)`
 
-### 7. Set Up Local Worker
+### 6. Add a New User
 
-Create `.env` in project root:
+1. Get the user's **Jira account ID** (see [How to find account ID](#how-to-find-jira-account-id))
+2. Add their ID to `JIRA_AI_USERNAMES` in Vercel env vars (comma-separated)
+3. Redeploy
+4. Share with the user: **database URL** and their **Jira account ID**
+
+---
+
+## Worker Setup (each user)
+
+Each user runs their own worker on their local machine.
+
+### Prerequisites
+
+| Tool | Install | Purpose |
+|------|---------|---------|
+| Node.js 18+ | `brew install node` | Runtime |
+| pnpm | `npm install -g pnpm` | Package manager |
+| Claude Code CLI | `npm install -g @anthropic-ai/claude-code` | AI coding agent |
+| GitHub CLI | `brew install gh` | Create PRs |
+
+```bash
+claude                # follow login prompt
+gh auth login         # GitHub CLI
+```
+
+### 1. Clone & Install
+
+```bash
+git clone <repo-url>
+cd my-agent-orchestrator
+pnpm install
+```
+
+### 2. Create `.env`
 
 ```env
-DATABASE_URL=postgresql://user:pass@ep-xxx.region.neon.tech:5432/dbname?sslmode=require
+# Your Jira account ID — worker only picks up YOUR jobs
+WORKER_USER_ID=712020:your-account-id
+
+# Database — use the DIRECT (non-pooled) Neon URL (get from admin)
+DATABASE_URL=postgresql://user:pass@ep-xxx.neon.tech:5432/neondb?sslmode=require
+DIRECT_URL=postgresql://user:pass@ep-xxx.neon.tech:5432/neondb?sslmode=require
+
+# Jira API (for posting PR links as comments)
 JIRA_BASE_URL=https://your-org.atlassian.net
 JIRA_API_TOKEN=your-jira-api-token
 JIRA_USER_EMAIL=your-email@company.com
+
+# GitHub CLI
 GH_TOKEN=ghp_xxxxxxxxxxxx
 ```
 
-Use the **direct** (non-pooled) Neon connection URL for the worker.
+### 3. Configure `repos.json`
 
-Configure repository mappings in `repos.json`:
+Map Jira project keys to your local repo paths:
 
 ```json
 {
@@ -165,27 +174,27 @@ Configure repository mappings in `repos.json`:
 }
 ```
 
-This maps Jira project keys to local repo paths. When the worker picks up a job for project `IVY`, it looks up the repo path here.
-
-Ensure repos are cloned locally:
+Ensure repos are cloned:
 
 ```bash
-git clone git@github.com:your-org/ivy-2.git /path/to/ivy-2
+git clone git@github.com:your-org/ivy-2.git /Users/you/projects/ivy-2
 ```
 
-Start the worker:
+### 4. Start Worker
 
 ```bash
 pnpm worker
-# → Worker started, polling every 5s...
+# → Worker started for user 712020:your-account-id, polling every 5s...
 ```
+
+The worker only picks up jobs where `assigneeAccountId` matches your `WORKER_USER_ID`.
 
 ---
 
 ## Test End-to-End
 
-1. Start worker: `pnpm worker`
-2. Assign a Jira ticket to the AI user
+1. Start your worker: `pnpm worker`
+2. In Jira, assign a ticket to yourself (your account must be in `JIRA_AI_USERNAMES`)
 3. Watch worker logs — job picked up within 5 seconds
 4. PR appears on GitHub, comment posted on Jira ticket
 
@@ -206,7 +215,7 @@ curl -X POST https://your-project.vercel.app/api/webhooks/jira \
         "summary": "Add login API endpoint",
         "description": "Create POST /auth/login with JWT token response",
         "project": { "id": "1", "key": "IVY", "name": "Ivy" },
-        "assignee": { "accountId": "<JIRA_AI_USERNAME>", "displayName": "AI" },
+        "assignee": { "accountId": "<YOUR_JIRA_ACCOUNT_ID>", "displayName": "You" },
         "status": { "name": "To Do" },
         "issuetype": { "name": "Story" },
         "priority": { "name": "Medium" }
@@ -219,14 +228,21 @@ curl -X POST https://your-project.vercel.app/api/webhooks/jira \
         "fieldtype": "jira",
         "from": null,
         "fromString": null,
-        "to": "<JIRA_AI_USERNAME>",
-        "toString": "AI"
+        "to": "<YOUR_JIRA_ACCOUNT_ID>",
+        "toString": "You"
       }]
     }
   }'
 ```
 
-Expected: `{ "status": "accepted", "jobId": "..." }`
+---
+
+## How to Find Jira Account ID
+
+```bash
+curl -s -u your-email@company.com:<JIRA_API_TOKEN> \
+  https://your-org.atlassian.net/rest/api/3/myself | jq .accountId
+```
 
 ---
 
@@ -240,7 +256,6 @@ pnpm typecheck             # TypeScript check
 pnpm prisma:migrate        # Run migrations (dev)
 pnpm prisma:migrate:deploy # Run migrations (prod)
 pnpm prisma:studio         # Open Prisma Studio
-pnpm deploy                # Deploy to Vercel (or push to GitHub for auto-deploy)
 ```
 
 ---
@@ -249,13 +264,13 @@ pnpm deploy                # Deploy to Vercel (or push to GitHub for auto-deploy
 
 ```
 api/                       # Vercel serverless functions
-├── webhooks/jira.ts       # Jira webhook handler
+├── webhooks/jira.ts       # Jira webhook → create job
 ├── webhooks/github/
-│   └── callback.ts        # GitHub callback handler
+│   └── callback.ts        # GitHub callback → update job
 ├── jobs/
 │   ├── index.ts           # GET /api/jobs
 │   └── [id].ts            # GET /api/jobs/[id]
-├── cron/cleanup.ts        # Daily cleanup cron
+├── cron/cleanup.ts        # Weekly cleanup cron
 └── health.ts              # Health check
 
 lib/                       # Shared code (plain TypeScript)
@@ -267,11 +282,11 @@ lib/                       # Shared code (plain TypeScript)
 ├── jira.service.ts        # Webhook processing logic
 ├── jira-api.client.ts     # Post comments on Jira
 ├── callbacks.service.ts   # GitHub callback handling
-├── repository-resolver.ts # Project key → repo mapping
-└── claude-code.worker.ts  # Claude Code execution
+├── repository-resolver.ts # Project key → repo mapping (worker-only)
+└── claude-code.worker.ts  # Claude Code execution (worker-only)
 
 worker/
-└── index.ts               # Polling loop + orchestration
+└── index.ts               # Polling loop (filters by WORKER_USER_ID)
 
 prisma/
 └── schema.prisma          # Database schema
@@ -279,34 +294,17 @@ prisma/
 
 ---
 
-## How to Get `JIRA_AI_USERNAME`
-
-This is your **Jira account ID** (not display name):
-
-```bash
-curl -s -u your-email@company.com:<JIRA_API_TOKEN> \
-  https://your-org.atlassian.net/rest/api/3/myself | jq .accountId
-```
-
----
-
 ## Monitoring
 
 ```bash
-# List all jobs
+# All jobs
 curl https://your-project.vercel.app/api/jobs | jq .
+
+# Jobs for a specific user
+curl "https://your-project.vercel.app/api/jobs?assignee=712020:xxx" | jq .
 
 # Filter by status
 curl "https://your-project.vercel.app/api/jobs?status=FAILED" | jq .
-
-# Specific job
-curl https://your-project.vercel.app/api/jobs/<jobId> | jq .
-```
-
-Worker logs include job context:
-
-```
-[INFO] [jobId=xxx] [jira=IVY-42] [repo=/path/to/repo] Starting agent execution
 ```
 
 ---
@@ -315,11 +313,12 @@ Worker logs include job context:
 
 | Problem | Solution |
 |---------|----------|
-| Webhook returns 401 | Check `x-webhook-secret` header matches `JIRA_WEBHOOK_SECRET` in Vercel env |
-| Webhook returns 202 / "ignored" | Event is not an assignment, or assignee doesn't match `JIRA_AI_USERNAME` |
-| Jobs stuck in PENDING | Is the worker running? Is it connected to the correct DB? |
-| Job FAILED "Repository not found" | Check `REPO_MAPPINGS` / `repos.json` — repo must be cloned locally |
-| Worker can't connect to DB | Use the **direct** (non-pooled) Neon URL with `?sslmode=require` |
+| Webhook returns 401 | Check `x-webhook-secret` matches `JIRA_WEBHOOK_SECRET` |
+| Webhook returns 202 / "ignored" | Assignee not in `JIRA_AI_USERNAMES` list |
+| Jobs stuck in PENDING | Worker not running, or `WORKER_USER_ID` doesn't match the job's assignee |
+| Job FAILED "No repository mapping" | Check `repos.json` — project key must match |
+| Job FAILED "Repository not found" | Clone the repo locally first |
+| Worker can't connect to DB | Use **direct** (non-pooled) Neon URL with `?sslmode=require` |
 | No PR created | Run `gh auth status`, check `GH_TOKEN` has `repo` scope |
 
 ---
@@ -328,9 +327,9 @@ Worker logs include job context:
 
 | Resource | Limit | Our Usage |
 |----------|-------|-----------|
-| Serverless executions | 100GB-hrs/month | Webhook handlers run < 1s |
-| Function timeout | 60s | Handlers complete in ~200ms |
+| Serverless executions | 100GB-hrs/month | Webhook handlers < 1s |
+| Function timeout | 60s | Handlers ~200ms |
 | Cron jobs | 2 | 1 used (daily cleanup) |
-| Postgres (Neon) | 256MB | Cleaned daily (30-day retention) |
+| Postgres (Neon) | 256MB | Cleaned weekly (7-day retention) |
 
 See [docs/architecture.md](docs/architecture.md) and [docs/setup.md](docs/setup.md) for detailed documentation.

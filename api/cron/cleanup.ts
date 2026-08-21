@@ -16,7 +16,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   try {
-    const deletedCount = await deleteOldJobs(30);
+    const deletedCount = await deleteOldJobs(7);
     logger.log(`Cleanup completed: deleted ${deletedCount} old jobs`);
     return res.json({ status: 'ok', deletedCount });
   } catch (error) {
